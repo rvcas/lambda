@@ -1,5 +1,9 @@
 const std = @import("std");
 
+const Allocator = std.mem.Allocator;
+
+const Env = std.StringHashMap(*Value);
+
 const Expr = union(enum) {
     variable: []const u8,
     lambda: struct {
@@ -10,6 +14,41 @@ const Expr = union(enum) {
         operator: *Expr,
         operand: *Expr,
     },
+
+    fn eval(self: *Expr, env: *Env, allocator: Allocator) Allocator.Error!*Value {
+        return switch (self.*) {
+            .variable => |variable| blk: {
+                if (env.get(variable)) |name| {
+                    break :blk name;
+                } else {
+                    var err = try allocator.create(Value);
+
+                    err.* = Value{ .err = "Variable is not defined" };
+
+                    break :blk err;
+                }
+            },
+            .lambda => |lambda| blk: {
+                var closure = try allocator.create(Value);
+
+                closure.* = Value{
+                    .closure = .{
+                        .name = lambda.name,
+                        .body = lambda.body,
+                        .env = env,
+                    },
+                };
+
+                break :blk closure;
+            },
+            .application => |application| blk: {
+                var left = try application.operator.eval(env, allocator);
+                var right = try application.operand.eval(env, allocator);
+
+                break :blk try left.call(right, allocator);
+            },
+        };
+    }
 };
 
 const Value = union(enum) {
@@ -21,88 +60,46 @@ const Value = union(enum) {
         env: *Env,
     },
     err: []const u8,
-};
 
-const Env = std.StringHashMap(*Value);
+    fn call(self: *Value, argument: *Value, allocator: Allocator) Allocator.Error!*Value {
+        return switch (self.*) {
+            .closure => |closure| blk: {
+                try closure.env.put(closure.name, argument);
 
-fn eval(expr: *Expr, env: *Env, allocator: std.mem.Allocator) *Value {
-    return switch (expr.*) {
-        .variable => |variable| blk: {
-            if (env.get(variable)) |name| {
-                break :blk name;
-            } else {
-                var err = allocator.create(Value) catch unreachable;
+                break :blk try closure.body.eval(closure.env, allocator);
+            },
+            else => blk: {
+                var err = try allocator.create(Value);
 
-                err.* = Value{ .err = "Variable is not defined" };
+                err.* = Value{ .err = "Only functions can be called" };
 
                 break :blk err;
-            }
-        },
-        .lambda => |lambda| blk: {
-            var closure = allocator.create(Value) catch unreachable;
-
-            closure.* = Value{
-                .closure = .{
-                    .name = lambda.name,
-                    .body = lambda.body,
-                    .env = env,
-                },
-            };
-
-            break :blk closure;
-        },
-        .application => |application| blk: {
-            var left = eval(application.operator, env, allocator);
-            var right = eval(application.operand, env, allocator);
-
-            break :blk call(left, right, allocator);
-        },
-    };
-}
-
-fn call(function: *Value, argument: *Value, allocator: std.mem.Allocator) *Value {
-    return switch (function.*) {
-        .closure => |closure| blk: {
-            closure.env.put(closure.name, argument) catch unreachable;
-
-            break :blk eval(closure.body, closure.env, allocator);
-        },
-        else => blk: {
-            var err = allocator.create(Value) catch unreachable;
-
-            err.* = Value{ .err = "Only functions can be called" };
-
-            break :blk err;
-        },
-    };
-}
-
-const testing = std.testing;
+            },
+        };
+    }
+};
 
 test "calculus" {
-    var env = Env.init(testing.allocator);
+    var env = Env.init(std.testing.allocator);
     defer env.deinit();
 
-    var expr = try testing.allocator.create(Expr);
-    defer testing.allocator.destroy(expr);
+    var expr = Expr{ .variable = "x" };
 
-    expr.* = Expr{ .variable = "x" };
-
-    const undefined_result = eval(expr, &env, testing.allocator);
-    defer testing.allocator.destroy(undefined_result);
+    const undefined_result = try expr.eval(&env, std.testing.allocator);
+    defer std.testing.allocator.destroy(undefined_result);
 
     try std.testing.expectEqual(
         Value{ .err = "Variable is not defined" },
         undefined_result.*,
     );
 
-    var int_value = try testing.allocator.create(Value);
+    var int_value = try std.testing.allocator.create(Value);
     int_value.* = Value{ .int = 123 };
 
     try env.put("x", int_value);
 
-    const int_result = eval(expr, &env, testing.allocator);
-    defer testing.allocator.destroy(int_result);
+    const int_result = try expr.eval(&env, std.testing.allocator);
+    defer std.testing.allocator.destroy(int_result);
 
     try std.testing.expectEqual(
         Value{ .int = 123 },

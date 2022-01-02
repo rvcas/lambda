@@ -1,6 +1,6 @@
 # Lambda Calculus
 
-An implementation of the simple lambda calculus in zig.
+A simple implementation of the lambda calculus in zig.
 
 ## Resources
 

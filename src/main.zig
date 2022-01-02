@@ -6,6 +6,11 @@ const Allocator = std.mem.Allocator;
 // are defined.
 const Environment = std.StringHashMap(*Value);
 
+const EvaluationError = error{
+    Undefined,
+    NonFunctionCalled,
+} || Allocator.Error;
+
 const Expression = union(enum) {
     variable: []const u8,
     lambda: struct {
@@ -17,17 +22,13 @@ const Expression = union(enum) {
         operand: *Expression,
     },
 
-    fn eval(self: *Expression, environment: *Environment, allocator: Allocator) Allocator.Error!*Value {
+    fn eval(self: *Expression, environment: *Environment, allocator: Allocator) EvaluationError!*Value {
         return switch (self.*) {
             .variable => |variable| blk: {
                 if (environment.get(variable)) |name| {
                     break :blk name;
                 } else {
-                    var err = try allocator.create(Value);
-
-                    err.* = Value{ .err = "Variable is not defined" };
-
-                    break :blk err;
+                    return error.Undefined;
                 }
             },
             .lambda => |lambda| blk: {
@@ -63,19 +64,15 @@ const Value = union(enum) {
     },
     err: []const u8,
 
-    fn call(self: *Value, argument: *Value, allocator: Allocator) Allocator.Error!*Value {
+    fn call(self: *Value, argument: *Value, allocator: Allocator) EvaluationError!*Value {
         return switch (self.*) {
             .closure => |closure| blk: {
                 try closure.environment.put(closure.name, argument);
 
                 break :blk try closure.body.eval(closure.environment, allocator);
             },
-            else => blk: {
-                var err = try allocator.create(Value);
-
-                err.* = Value{ .err = "Only functions can be called" };
-
-                break :blk err;
+            else => {
+                return error.NonFunctionCalled;
             },
         };
     }
@@ -87,12 +84,11 @@ test "calculus" {
 
     var expression = Expression{ .variable = "x" };
 
-    const undefined_result = try expression.eval(&environment, std.testing.allocator);
-    defer std.testing.allocator.destroy(undefined_result);
+    const undefined_result = expression.eval(&environment, std.testing.allocator);
 
-    try std.testing.expectEqual(
-        Value{ .err = "Variable is not defined" },
-        undefined_result.*,
+    try std.testing.expectError(
+        error.Undefined,
+        undefined_result,
     );
 
     var int_value = try std.testing.allocator.create(Value);

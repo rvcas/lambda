@@ -62,7 +62,6 @@ const Value = union(enum) {
         body: *Expression,
         environment: *Environment,
     },
-    err: []const u8,
 
     fn call(self: *Value, argument: *Value, allocator: Allocator) EvaluationError!*Value {
         return switch (self.*) {

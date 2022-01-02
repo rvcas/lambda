@@ -2,23 +2,25 @@ const std = @import("std");
 
 const Allocator = std.mem.Allocator;
 
-const Env = std.StringHashMap(*Value);
+// This is used to keep track of values that
+// are defined.
+const Environment = std.StringHashMap(*Value);
 
-const Expr = union(enum) {
+const Expression = union(enum) {
     variable: []const u8,
     lambda: struct {
         name: []const u8,
-        body: *Expr,
+        body: *Expression,
     },
     application: struct {
-        operator: *Expr,
-        operand: *Expr,
+        operator: *Expression,
+        operand: *Expression,
     },
 
-    fn eval(self: *Expr, env: *Env, allocator: Allocator) Allocator.Error!*Value {
+    fn eval(self: *Expression, environment: *Environment, allocator: Allocator) Allocator.Error!*Value {
         return switch (self.*) {
             .variable => |variable| blk: {
-                if (env.get(variable)) |name| {
+                if (environment.get(variable)) |name| {
                     break :blk name;
                 } else {
                     var err = try allocator.create(Value);
@@ -35,15 +37,15 @@ const Expr = union(enum) {
                     .closure = .{
                         .name = lambda.name,
                         .body = lambda.body,
-                        .env = env,
+                        .environment = environment,
                     },
                 };
 
                 break :blk closure;
             },
             .application => |application| blk: {
-                var left = try application.operator.eval(env, allocator);
-                var right = try application.operand.eval(env, allocator);
+                var left = try application.operator.eval(environment, allocator);
+                var right = try application.operand.eval(environment, allocator);
 
                 break :blk try left.call(right, allocator);
             },
@@ -56,17 +58,17 @@ const Value = union(enum) {
     str: []const u8,
     closure: struct {
         name: []const u8,
-        body: *Expr,
-        env: *Env,
+        body: *Expression,
+        environment: *Environment,
     },
     err: []const u8,
 
     fn call(self: *Value, argument: *Value, allocator: Allocator) Allocator.Error!*Value {
         return switch (self.*) {
             .closure => |closure| blk: {
-                try closure.env.put(closure.name, argument);
+                try closure.environment.put(closure.name, argument);
 
-                break :blk try closure.body.eval(closure.env, allocator);
+                break :blk try closure.body.eval(closure.environment, allocator);
             },
             else => blk: {
                 var err = try allocator.create(Value);
@@ -80,12 +82,12 @@ const Value = union(enum) {
 };
 
 test "calculus" {
-    var env = Env.init(std.testing.allocator);
-    defer env.deinit();
+    var environment = Environment.init(std.testing.allocator);
+    defer environment.deinit();
 
-    var expr = Expr{ .variable = "x" };
+    var expression = Expression{ .variable = "x" };
 
-    const undefined_result = try expr.eval(&env, std.testing.allocator);
+    const undefined_result = try expression.eval(&environment, std.testing.allocator);
     defer std.testing.allocator.destroy(undefined_result);
 
     try std.testing.expectEqual(
@@ -96,9 +98,9 @@ test "calculus" {
     var int_value = try std.testing.allocator.create(Value);
     int_value.* = Value{ .int = 123 };
 
-    try env.put("x", int_value);
+    try environment.put("x", int_value);
 
-    const int_result = try expr.eval(&env, std.testing.allocator);
+    const int_result = try expression.eval(&environment, std.testing.allocator);
     defer std.testing.allocator.destroy(int_result);
 
     try std.testing.expectEqual(

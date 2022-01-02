@@ -25,8 +25,8 @@ const Expression = union(enum) {
     fn eval(self: *Expression, environment: *Environment, allocator: Allocator) EvaluationError!*Value {
         return switch (self.*) {
             .variable => |variable| blk: {
-                if (environment.get(variable)) |name| {
-                    break :blk name;
+                if (environment.get(variable)) |value| {
+                    break :blk value;
                 } else {
                     return error.Undefined;
                 }

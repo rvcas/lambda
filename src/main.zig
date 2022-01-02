@@ -46,6 +46,8 @@ const Expression = union(enum) {
             },
             .application => |application| blk: {
                 var left = try application.operator.eval(environment, allocator);
+                defer allocator.destroy(left);
+
                 var right = try application.operand.eval(environment, allocator);
 
                 break :blk try left.call(right, allocator);
@@ -81,25 +83,59 @@ test "calculus" {
     var environment = Environment.init(std.testing.allocator);
     defer environment.deinit();
 
-    var expression = Expression{ .variable = "x" };
+    var x_variable = Expression{ .variable = "x" };
 
-    const undefined_result = expression.eval(&environment, std.testing.allocator);
+    const undefined_result = x_variable.eval(&environment, std.testing.allocator);
 
+    // x is undefined
     try std.testing.expectError(
         error.Undefined,
         undefined_result,
     );
 
-    var int_value = try std.testing.allocator.create(Value);
-    int_value.* = Value{ .int = 123 };
+    var int_value = Value{ .int = 123 };
 
-    try environment.put("x", int_value);
+    try environment.put("x", &int_value);
 
-    const int_result = try expression.eval(&environment, std.testing.allocator);
-    defer std.testing.allocator.destroy(int_result);
+    const int_result = try x_variable.eval(&environment, std.testing.allocator);
 
     try std.testing.expectEqual(
-        Value{ .int = 123 },
+        int_value,
         int_result.*,
+    );
+
+    var identity = Expression{
+        .lambda = .{
+            .name = "x",
+            .body = &x_variable,
+        },
+    };
+
+    var y_variable = Expression{ .variable = "y" };
+
+    var application = Expression{
+        .application = .{
+            .operator = &identity,
+            .operand = &y_variable,
+        },
+    };
+
+    const another_undefined_result = application.eval(&environment, std.testing.allocator);
+
+    // y is undefined
+    try std.testing.expectError(
+        error.Undefined,
+        another_undefined_result,
+    );
+
+    var str_value = Value{ .str = "some string" };
+
+    try environment.put("y", &str_value);
+
+    const str_result = try application.eval(&environment, std.testing.allocator);
+
+    try std.testing.expectEqual(
+        str_value,
+        str_result.*,
     );
 }
